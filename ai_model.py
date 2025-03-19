@@ -1,93 +1,120 @@
 import pandas as pd
 import numpy as np
+from collections import Counter
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score
 from xgboost import XGBClassifier
+from imblearn.over_sampling import SMOTE
+import joblib
 
-# ✅ Step 1: Load dataset
-print("📥 Loading dataset...")
-df = pd.read_csv("dataset/intrusion_data.csv")  # ✅ Sahi dataset ka naam
-
+# ✅ Load dataset
+df = pd.read_csv("dataset/intrusion_data.csv")
 print("✅ Dataset loaded successfully!")
 
-# ✅ Step 2: Encode categorical features
-print("🔄 Encoding categorical features...")
-df = pd.get_dummies(df, drop_first=True)
-print("✅ Encoding completed!")
+# ✅ Encode categorical columns
+if 'protocol' in df.columns:
+    df['protocol'] = df['protocol'].astype('category').cat.codes  
 
-# ✅ Step 3: Feature Engineering
-print("🛠 Feature Engineering: Creating new features...")
-df["packet_ratio"] = df["packet_size"] / (df["src_port"] + df["dst_port"] + 1)
-df["src_port_dst_port"] = df["src_port"] * df["dst_port"]
-print("✅ New features added!")
+# ✅ Encode target column
+target_col = "attack_type"
+df[target_col] = df[target_col].astype("category").cat.codes
 
-# ✅ Step 4: Remove constant features
-df = df.loc[:, (df != df.iloc[0]).any()]
-print("✅ Removed constant features!")
+# ✅ Drop unnecessary features
+df.drop(columns=[col for col in ['src_ip', 'dst_ip'] if col in df.columns], inplace=True)
 
-# ✅ Step 5: Select best features
-print("🧠 Selecting best features...")
-feature_cols = ['src_ip', 'dst_ip', 'src_port', 'dst_port', 'packet_size', 'packet_ratio', 'src_port_dst_port']
+# ✅ Feature Engineering & Normalization
+df["packet_size"] = np.log1p(df["packet_size"].clip(lower=1))  
+if 'bytes_sent' in df.columns and 'bytes_received' in df.columns:
+    df["bytes_ratio"] = np.log1p(df["bytes_sent"] / (df["bytes_received"] + 1))  
+
+df["packet_ratio"] = np.log1p(df["packet_size"] / (df["src_port"].replace(0, 1) + df["dst_port"].replace(0, 1)))
+df["port_ratio"] = np.log1p(df["src_port"] / df["dst_port"].replace(0, 1))
+df["src_port_dst_port"] = np.log1p(df["src_port"] * df["dst_port"])
+
+# ✅ Selecting important features
+feature_cols = ['src_port', 'dst_port', 'packet_size', 'packet_ratio', 'port_ratio', 'src_port_dst_port']
+if 'protocol' in df.columns:
+    feature_cols.append('protocol')
+if 'connection_duration' in df.columns:
+    feature_cols.append('connection_duration')
+if 'bytes_ratio' in df.columns:
+    feature_cols.append('bytes_ratio')
+
 X = df[feature_cols]
-y = df["attack_type"]  # 🔹 "label" ki jagah "attack_type" use kar
+y = df[target_col]
 
-print(f"✅ Selected Features: {feature_cols}")
+# ✅ Handling class imbalance using SMOTE
+class_counts = Counter(y)
+sampling_strategy = {cls: max(class_counts.values()) for cls in class_counts}  # Balance to majority class
+smote = SMOTE(sampling_strategy=sampling_strategy, random_state=42)
+X_resampled, y_resampled = smote.fit_resample(X, y)
 
-# ✅ Step 6: Feature Scaling
+# ✅ Feature Scaling
 scaler = MinMaxScaler()
-X_scaled = scaler.fit_transform(X)
-print("✅ Feature scaling (MinMax) completed!")
+X_scaled = scaler.fit_transform(X_resampled)
 
-# ✅ Step 7: Split Data
-X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
-print("✅ Dataset split completed!")
+# ✅ Splitting dataset
+X_train, X_test, y_train, y_test = train_test_split(
+    X_scaled, y_resampled, test_size=0.2, random_state=42, stratify=y_resampled
+)
 
-# ✅ Step 8: Hyperparameter tuning
-print("🚀 Hyperparameter tuning for Random Forest...")
-param_grid_rf = {'n_estimators': [100, 200, 300], 'max_depth': [10, 20], 'min_samples_split': [2, 5, 10]}
-rf_grid = GridSearchCV(RandomForestClassifier(), param_grid_rf, cv=5, scoring='accuracy')
-rf_grid.fit(X_train, y_train)
-best_rf_params = rf_grid.best_params_  # ✅ Save best RF parameters
-print(f"✅ Best Random Forest Model: {best_rf_params}")
-
-print("🚀 Hyperparameter tuning for XGBoost...")
-param_grid_xgb = {'n_estimators': [100, 200], 'max_depth': [5, 10], 'learning_rate': [0.01, 0.1]}
-xgb_grid = GridSearchCV(XGBClassifier(), param_grid_xgb, cv=5, scoring='accuracy')
-xgb_grid.fit(X_train, y_train)
-best_xgb_params = xgb_grid.best_params_  # ✅ Save best XGB parameters
-print(f"✅ Best XGBoost Model: {best_xgb_params}")
-
-# ✅ Step 9: Train best models
-print("🚀 Training the best Random Forest and XGBoost models...")
-rf_model = RandomForestClassifier(**best_rf_params)
+# ✅ Hyperparameter tuning for Random Forest
+rf_params = {
+    'n_estimators': [100, 200, 300], 
+    'max_depth': [10, 20, 30], 
+    'min_samples_split': [2, 5, 10]
+}
+rf_model = GridSearchCV(RandomForestClassifier(class_weight='balanced_subsample'), rf_params, cv=5, scoring='roc_auc_ovr', n_jobs=-1)
 rf_model.fit(X_train, y_train)
+best_rf_params = rf_model.best_params_
+print(f"🔍 Best RF Params: {best_rf_params}")
 
-xgb_model = XGBClassifier(**best_xgb_params)
+# ✅ Hyperparameter tuning for XGBoost
+xgb_params = {
+    'n_estimators': [100, 200, 300], 
+    'max_depth': [5, 10, 15], 
+    'learning_rate': [0.01, 0.05, 0.1],
+    'scale_pos_weight': [1, 2, 5]
+}
+xgb_model = GridSearchCV(XGBClassifier(eval_metric='mlogloss'), xgb_params, cv=5, scoring='roc_auc_ovr', n_jobs=-1)
 xgb_model.fit(X_train, y_train)
-print("✅ Model training completed!")
+best_xgb_params = xgb_model.best_params_
+print(f"🔍 Best XGB Params: {best_xgb_params}")
 
-# ✅ Step 10: Model Evaluation
-print("📊 Evaluating models...")
-rf_pred = rf_model.predict(X_test)
-rf_accuracy = accuracy_score(y_test, rf_pred)
-print(f"✅ Random Forest Accuracy: {rf_accuracy:.2f}")
+# ✅ Train final models
+rf_final = RandomForestClassifier(**best_rf_params, class_weight='balanced_subsample')
+rf_final.fit(X_train, y_train)
+
+xgb_final = XGBClassifier(**best_xgb_params, eval_metric='mlogloss')
+xgb_final.fit(X_train, y_train)
+
+# ✅ Model Evaluation
+rf_pred = rf_final.predict(X_test)
+rf_acc = accuracy_score(y_test, rf_pred)
+rf_auc = roc_auc_score(y_test, rf_final.predict_proba(X_test), multi_class='ovr')
+
+xgb_pred = xgb_final.predict(X_test)
+xgb_acc = accuracy_score(y_test, xgb_pred)
+xgb_auc = roc_auc_score(y_test, xgb_final.predict_proba(X_test), multi_class='ovr')
+
+print(f"✅ Random Forest Accuracy: {rf_acc:.2f}, AUC: {rf_auc:.2f}")
 print("📜 RF Classification Report:\n", classification_report(y_test, rf_pred))
 
-xgb_pred = xgb_model.predict(X_test)
-xgb_accuracy = accuracy_score(y_test, xgb_pred)
-print(f"✅ XGBoost Accuracy: {xgb_accuracy:.2f}")
+print(f"✅ XGBoost Accuracy: {xgb_acc:.2f}, AUC: {xgb_auc:.2f}")
 print("📜 XGB Classification Report:\n", classification_report(y_test, xgb_pred))
 
-# ✅ Step 11: Save Best Model
-best_model = rf_model if rf_accuracy > xgb_accuracy else xgb_model
-best_model_name = "Random Forest" if rf_accuracy > xgb_accuracy else "XGBoost"
-print(f"🏆 Best Model Selected: {best_model_name}")
+# ✅ Confusion Matrices
+print("🔍 RF Confusion Matrix:\n", confusion_matrix(y_test, rf_pred))
+print("🔍 XGB Confusion Matrix:\n", confusion_matrix(y_test, xgb_pred))
 
-print("💾 Saving the best model...")
-import joblib
+# ✅ Save Best Model
+best_model = rf_final if rf_auc > xgb_auc else xgb_final
+best_model_name = "Random Forest" if rf_auc > xgb_auc else "XGBoost"
 joblib.dump(best_model, "best_model.pkl")
-print("✅ Best model saved successfully!")
 
+# ✅ Save Scaler with Feature Names
+joblib.dump({"scaler": scaler, "features": feature_cols}, "scaler.pkl")
 
+print(f"🏆 Best Model Selected: {best_model_name} and saved successfully!")
