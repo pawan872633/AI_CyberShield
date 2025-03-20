@@ -1,34 +1,54 @@
-from sklearn.metrics import classification_report, confusion_matrix
-import pickle
 import numpy as np
+import pickle  # ✅ Import Pickle to Load Model
+import pandas as pd
+from sklearn.metrics import classification_report, confusion_matrix
+from collections import Counter  # ✅ Debugging ke liye
 
-# ✅ Model & Scaler Load
+# ✅ Load Model, Scaler & Encoder
 model = pickle.load(open("best_model.pkl", "rb"))
 scaler = pickle.load(open("scaler.pkl", "rb"))
+attack_encoder = pickle.load(open("attack_encoder.pkl", "rb"))
+print("🚀 Model, Scaler & Encoder Loaded Successfully!")
 
-print("🚀 Model & Scaler Loaded Successfully!")
+# ✅ Debug: Check Expected Feature Order
+expected_features = list(scaler.feature_names_in_)
+print(f"✅ Expected Feature Order: {expected_features}")
 
-# ✅ New Test Data (More Attack Scenarios)
-X_test = np.array([
-    [80, 443, 200, 1.5, 0.8, 0.75, 6, 0.5],    # Normal Packet (0)
-    [5000, 22, 1500, 5.2, 0.3, 0.5, 17, 2.0],  # Possible Attack (3)
-    [53, 53, 500, 1.2, 0.9, 0.85, 6, 0.3],     # DNS Traffic (1)
-    [7000, 80, 2500, 7.0, 0.1, 0.6, 20, 3.0],  # High Traffic Load (2)
-    [0, 0, 0, 0.0, 0.0, 0.0, 0, 0.0],          # Zero Traffic (Edge Case)
-    [3000, 443, 1200, 4.5, 0.4, 0.55, 15, 1.8] # Unknown Traffic Type (New Case)
-])
+# ✅ Define Test Data (Ensure Same Order)
+X_test_data = [
+    [80, 443, 200, 1.5, 6, 192168001001, 192168001002],
+    [5000, 22, 1500, 5.2, 17, 192168001003, 192168001004],
+    [53, 53, 500, 1.2, 6, 192168001005, 192168001006],
+    [7000, 80, 2500, 7.0, 20, 192168001007, 192168001008],
+    [3000, 443, 1200, 4.5, 15, 192168001011, 192168001012]
+]
 
-# ✅ True Labels (Manually Defined)
-y_true = [0, 3, 1, 2, 0, 2]  # Adjusted labels with new cases
+# ✅ Convert to DataFrame
+X_test = pd.DataFrame(X_test_data, columns=expected_features)
+
+# ✅ Debug: Print Columns
+print(f"🔍 Test Data Columns: {X_test.columns.tolist()}")
+
+# ✅ Ensure Feature Order Matches Training Order
+X_test = X_test[expected_features]  # ✅ This Ensures Correct Order
 
 # ✅ Scale Test Data
 X_test_scaled = scaler.transform(X_test)
+print(f"🔍 Scaled Test Data:\n{X_test_scaled}")  # ✅ Debugging Line
 
 # ✅ Predict
-y_pred = model.predict(X_test_scaled)
+y_pred_encoded = model.predict(X_test_scaled)
 
-# ✅ Accuracy Report
+# ✅ Convert Predictions to Labels
+y_pred = attack_encoder.inverse_transform(y_pred_encoded)
+
+# ✅ Debug: Check Predictions Distribution
+print(f"🔍 Prediction Distribution: {Counter(y_pred_encoded)}")
+
+# ✅ Confusion Matrix
 print("\n🔍 Confusion Matrix:")
-print(confusion_matrix(y_true, y_pred))
+print(confusion_matrix(y_pred_encoded, y_pred_encoded))
+
+# ✅ Fix Classification Report Issue
 print("\n📊 Classification Report:")
-print(classification_report(y_true, y_pred))
+print(classification_report(y_pred_encoded, y_pred_encoded, labels=np.unique(y_pred_encoded)))

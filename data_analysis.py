@@ -9,7 +9,7 @@ df = pd.read_csv(file_path)
 # ✅ Pehli 5 rows print karna
 print("🔹 First 5 Rows of Data:")
 print(df.head())
-
+  
 # ✅ Data ka structure dekhna
 print("\n🔹 Dataset Structure:")
 print(df.info())

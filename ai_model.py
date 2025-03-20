@@ -1,120 +1,80 @@
 import pandas as pd
-import numpy as np
-from collections import Counter
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.preprocessing import MinMaxScaler
+import pickle
+from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score
-from xgboost import XGBClassifier
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from imblearn.over_sampling import SMOTE
-import joblib
+from collections import Counter
 
-# ✅ Load dataset
-df = pd.read_csv("dataset/intrusion_data.csv")
-print("✅ Dataset loaded successfully!")
+# ✅ Load Dataset
+try:
+    df = pd.read_csv("dataset/intrusion_data.csv")
+    print("✅ Dataset Loaded Successfully!")
+except FileNotFoundError:
+    print("❌ Error: Dataset File Not Found! Check Path.")
+    exit()
 
-# ✅ Encode categorical columns
-if 'protocol' in df.columns:
-    df['protocol'] = df['protocol'].astype('category').cat.codes  
+# ✅ Ensure Required Columns Exist
+required_columns = ["src_port", "dst_port", "packet_size", "connection_duration", "protocol", "attack_type"]
+missing_columns = [col for col in required_columns if col not in df.columns]
+if missing_columns:
+    print(f"❌ Error: Missing columns in dataset -> {missing_columns}")
+    exit()
 
-# ✅ Encode target column
-target_col = "attack_type"
-df[target_col] = df[target_col].astype("category").cat.codes
+# ✅ Label Encoding for 'protocol'
+protocol_encoder = LabelEncoder()
+df["protocol"] = protocol_encoder.fit_transform(df["protocol"])
+with open("protocol_encoder.pkl", "wb") as f:
+    pickle.dump(protocol_encoder, f)
+print("✅ Protocol Encoder Saved Successfully!")
 
-# ✅ Drop unnecessary features
-df.drop(columns=[col for col in ['src_ip', 'dst_ip'] if col in df.columns], inplace=True)
+# ✅ Label Encoding for 'attack_type'
+attack_encoder = LabelEncoder()
+df["attack_type"] = attack_encoder.fit_transform(df["attack_type"])
+with open("attack_encoder.pkl", "wb") as f:
+    pickle.dump(attack_encoder, f)
+print("✅ Attack Type Encoder Saved Successfully!")
 
-# ✅ Feature Engineering & Normalization
-df["packet_size"] = np.log1p(df["packet_size"].clip(lower=1))  
-if 'bytes_sent' in df.columns and 'bytes_received' in df.columns:
-    df["bytes_ratio"] = np.log1p(df["bytes_sent"] / (df["bytes_received"] + 1))  
+# ✅ Feature Selection
+X = df.drop(columns=["attack_type"])
+y = df["attack_type"]
+print(f"🔍 Features Before SMOTE: {X.shape[1]} Columns")
 
-df["packet_ratio"] = np.log1p(df["packet_size"] / (df["src_port"].replace(0, 1) + df["dst_port"].replace(0, 1)))
-df["port_ratio"] = np.log1p(df["src_port"] / df["dst_port"].replace(0, 1))
-df["src_port_dst_port"] = np.log1p(df["src_port"] * df["dst_port"])
-
-# ✅ Selecting important features
-feature_cols = ['src_port', 'dst_port', 'packet_size', 'packet_ratio', 'port_ratio', 'src_port_dst_port']
-if 'protocol' in df.columns:
-    feature_cols.append('protocol')
-if 'connection_duration' in df.columns:
-    feature_cols.append('connection_duration')
-if 'bytes_ratio' in df.columns:
-    feature_cols.append('bytes_ratio')
-
-X = df[feature_cols]
-y = df[target_col]
-
-# ✅ Handling class imbalance using SMOTE
-class_counts = Counter(y)
-sampling_strategy = {cls: max(class_counts.values()) for cls in class_counts}  # Balance to majority class
-smote = SMOTE(sampling_strategy=sampling_strategy, random_state=42)
+# ✅ Handle Data Imbalance using SMOTE
+smote = SMOTE(random_state=42)
 X_resampled, y_resampled = smote.fit_resample(X, y)
+print("🔍 Class Distribution After SMOTE:", Counter(y_resampled))
+
+# ✅ Split Data
+X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled, test_size=0.2, random_state=42)
 
 # ✅ Feature Scaling
-scaler = MinMaxScaler()
-X_scaled = scaler.fit_transform(X_resampled)
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+with open("scaler.pkl", "wb") as f:
+    pickle.dump(scaler, f)
+print("✅ Scaler Saved Successfully!")
 
-# ✅ Splitting dataset
-X_train, X_test, y_train, y_test = train_test_split(
-    X_scaled, y_resampled, test_size=0.2, random_state=42, stratify=y_resampled
+# ✅ Train Model (Hyperparameter Tuning for Accuracy)
+model = RandomForestClassifier(
+    n_estimators=200, 
+    max_depth=20, 
+    min_samples_split=5, 
+    random_state=42
 )
+model.fit(X_train_scaled, y_train)
 
-# ✅ Hyperparameter tuning for Random Forest
-rf_params = {
-    'n_estimators': [100, 200, 300], 
-    'max_depth': [10, 20, 30], 
-    'min_samples_split': [2, 5, 10]
-}
-rf_model = GridSearchCV(RandomForestClassifier(class_weight='balanced_subsample'), rf_params, cv=5, scoring='roc_auc_ovr', n_jobs=-1)
-rf_model.fit(X_train, y_train)
-best_rf_params = rf_model.best_params_
-print(f"🔍 Best RF Params: {best_rf_params}")
+# ✅ Save Model
+with open("best_model.pkl", "wb") as f:
+    pickle.dump(model, f)
+print("✅ AI Model Trained & Saved Successfully! 🚀")
 
-# ✅ Hyperparameter tuning for XGBoost
-xgb_params = {
-    'n_estimators': [100, 200, 300], 
-    'max_depth': [5, 10, 15], 
-    'learning_rate': [0.01, 0.05, 0.1],
-    'scale_pos_weight': [1, 2, 5]
-}
-xgb_model = GridSearchCV(XGBClassifier(eval_metric='mlogloss'), xgb_params, cv=5, scoring='roc_auc_ovr', n_jobs=-1)
-xgb_model.fit(X_train, y_train)
-best_xgb_params = xgb_model.best_params_
-print(f"🔍 Best XGB Params: {best_xgb_params}")
+# ✅ Feature Importance Debugging
+importances = model.feature_importances_
+for feature, importance in zip(X.columns, importances):
+    print(f"⭐ {feature}: {importance:.4f}")
 
-# ✅ Train final models
-rf_final = RandomForestClassifier(**best_rf_params, class_weight='balanced_subsample')
-rf_final.fit(X_train, y_train)
+# ✅ Debug: Ensure Feature Count Matches
+print(f"✅ Model Trained with {X_train.shape[1]} Features")
 
-xgb_final = XGBClassifier(**best_xgb_params, eval_metric='mlogloss')
-xgb_final.fit(X_train, y_train)
-
-# ✅ Model Evaluation
-rf_pred = rf_final.predict(X_test)
-rf_acc = accuracy_score(y_test, rf_pred)
-rf_auc = roc_auc_score(y_test, rf_final.predict_proba(X_test), multi_class='ovr')
-
-xgb_pred = xgb_final.predict(X_test)
-xgb_acc = accuracy_score(y_test, xgb_pred)
-xgb_auc = roc_auc_score(y_test, xgb_final.predict_proba(X_test), multi_class='ovr')
-
-print(f"✅ Random Forest Accuracy: {rf_acc:.2f}, AUC: {rf_auc:.2f}")
-print("📜 RF Classification Report:\n", classification_report(y_test, rf_pred))
-
-print(f"✅ XGBoost Accuracy: {xgb_acc:.2f}, AUC: {xgb_auc:.2f}")
-print("📜 XGB Classification Report:\n", classification_report(y_test, xgb_pred))
-
-# ✅ Confusion Matrices
-print("🔍 RF Confusion Matrix:\n", confusion_matrix(y_test, rf_pred))
-print("🔍 XGB Confusion Matrix:\n", confusion_matrix(y_test, xgb_pred))
-
-# ✅ Save Best Model
-best_model = rf_final if rf_auc > xgb_auc else xgb_final
-best_model_name = "Random Forest" if rf_auc > xgb_auc else "XGBoost"
-joblib.dump(best_model, "best_model.pkl")
-
-# ✅ Save Scaler with Feature Names
-joblib.dump({"scaler": scaler, "features": feature_cols}, "scaler.pkl")
-
-print(f"🏆 Best Model Selected: {best_model_name} and saved successfully!")
