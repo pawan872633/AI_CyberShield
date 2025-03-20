@@ -1,4 +1,4 @@
-import numpy as np  
+import numpy as np
 import pickle  # ✅ Import Pickle to Load Model
 import pandas as pd
 from sklearn.metrics import classification_report, confusion_matrix
