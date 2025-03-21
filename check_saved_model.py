@@ -1,18 +1,20 @@
 import joblib
 
 try:
-    # ✅ Load saved model
+    # Load best model
     best_model = joblib.load("best_model.pkl")
     print("✅ Best Model Loaded Successfully!")
 
-    # ✅ Load scaler
-    scaler_data = joblib.load("scaler.pkl")
-    scaler = scaler_data["scaler"]
-    feature_names = scaler_data["features"]
+    # Load scaler
+    scaler = joblib.load("scaler.pkl")
+    print(f"✅ Scaler Loaded! Type: {type(scaler)}")
 
-    print(f"✅ Scaler Loaded! Features used: {feature_names}")
+    # Check if scaler is StandardScaler
+    if hasattr(scaler, "mean_"):
+        print(f"✅ Scaler Mean: {scaler.mean_}")
 
 except FileNotFoundError:
     print("❌ Model ya Scaler file nahi mili! Pehle train karna padega.")
 except Exception as e:
     print(f"❌ Error: {e}")
+
