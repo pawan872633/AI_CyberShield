@@ -1,35 +1,60 @@
-from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
+import pandas as pd
+import joblib
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report
 
-# Predict on test set
-y_pred = model.predict(X_test)
+# 📌 Data Load
+try:
+    data = pd.read_csv("dataset/intrusion_data.csv")
+    print("✅ Data loaded successfully!")
+except FileNotFoundError:
+    print("❌ Error: Dataset file not found! Check the path.")
+    exit()
 
-# Generate classification report
-print("Classification Report:\n", classification_report(y_test, y_pred))
+# 📌 Automatically detect target column (assuming last column is the target)
+target_column = data.columns[-1]  # Last column is assumed as the target
+print(f"🎯 Detected target column: {target_column}")
 
-# Confusion Matrix
-cm = confusion_matrix(y_test, y_pred)
-plt.figure(figsize=(6,5))
-sns.heatmap(cm, annot=True, fmt='d', cmap='coolwarm', xticklabels=["Normal", "Attack"], yticklabels=["Normal", "Attack"])
-plt.xlabel("Predicted")
-plt.ylabel("Actual")
-plt.title("Confusion Matrix")
-plt.show()
+# 📌 Convert categorical features to numeric
+categorical_columns = data.select_dtypes(include=['object']).columns.tolist()
+print(f"🔄 Converting categorical columns: {categorical_columns}")
 
-# ROC Curve
-y_prob = model.predict_proba(X_test)[:, 1]  # Get probability for positive class
-fpr, tpr, _ = roc_curve(y_test, y_prob)
-roc_auc = auc(fpr, tpr)
+label_encoders = {}  # Store encoders for future use
+for col in categorical_columns:
+    le = LabelEncoder()
+    data[col] = le.fit_transform(data[col])
+    label_encoders[col] = le  # Store encoder
 
-plt.figure(figsize=(6,5))
-plt.plot(fpr, tpr, label=f'ROC curve (area = {roc_auc:.2f})', color='blue')
-plt.plot([0, 1], [0, 1], linestyle='--', color='gray')  # Diagonal line
-plt.xlabel("False Positive Rate")
-plt.ylabel("True Positive Rate")
-plt.title("ROC-AUC Curve")
-plt.legend(loc="lower right")
-plt.show()
+# 📌 Features & Labels
+X = data.drop(target_column, axis=1)
+y = data[target_column]
+
+# 📌 Train-Test Split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# 📌 Feature Scaling
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# 📌 Model Training (Balanced RandomForest)
+model = RandomForestClassifier(class_weight='balanced', random_state=42)
+model.fit(X_train_scaled, y_train)
+
+# 📌 Predictions
+y_pred = model.predict(X_test_scaled)
+
+# 📌 Evaluation
+print("📊 Classification Report:")
+print(classification_report(y_test, y_pred))
+
+# 📌 Save Model, Scaler & Label Encoders
+joblib.dump(model, "final_model.pkl")
+joblib.dump(scaler, "scaler.pkl")
+joblib.dump(label_encoders, "label_encoders.pkl")  # Save encoders for future decoding
+print("✅ Model, Scaler & Encoders saved successfully!")
+
 
 

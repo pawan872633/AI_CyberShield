@@ -1,5 +1,6 @@
-import pandas as pd
+import pandas as pd 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.ensemble import RandomForestClassifier
 import joblib
 
 # ✅ Dataset Load Karo
@@ -14,13 +15,19 @@ for column in df.select_dtypes(include=['object']).columns:
 
 # ✅ Feature Selection (Assuming Last Column = Target)
 X = df.iloc[:, :-1]  # Last column ko hata diya
+y = df.iloc[:, -1]  # Last column ko target variable mana
 
 # ✅ Scaling
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
-# ✅ Save Scaler & Encoders
-joblib.dump(scaler, "scaler.pkl")
-joblib.dump(label_encoders, "label_encoders.pkl")  # Save Encoders
+# ✅ Model Training
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_scaled, y)
 
-print("✅ Scaler & Label Encoders Saved Successfully! 🚀")
+# ✅ Save Model, Scaler & Encoders
+joblib.dump(model, "model.pkl")
+joblib.dump(scaler, "scaler.pkl")
+joblib.dump(label_encoders, "label_encoders.pkl")
+
+print("✅ Model, Scaler & Label Encoders Saved Successfully! 🚀")

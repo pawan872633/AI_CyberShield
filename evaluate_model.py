@@ -1,54 +1,45 @@
-import numpy as np  
-import pickle  # ✅ Import Pickle to Load Model
 import pandas as pd
-from sklearn.metrics import classification_report, confusion_matrix
-from collections import Counter  # ✅ Debugging ke liye
+import joblib
+from sklearn.metrics import classification_report
 
-# ✅ Load Model, Scaler & Encoder
-model = pickle.load(open("best_model.pkl", "rb"))
-scaler = pickle.load(open("scaler.pkl", "rb"))
-attack_encoder = pickle.load(open("attack_encoder.pkl", "rb"))
-print("🚀 Model, Scaler & Encoder Loaded Successfully!")
+# ✅ Model, scaler, and encoders load karna
+try:
+    model = joblib.load('model/best_model.pkl')
+    scaler = joblib.load('scaler.pkl')
+    encoders = joblib.load('label_encoders.pkl')  # Dictionary of encoders
+    print("✅ Model, Scaler, and Encoders Loaded Successfully!")
+except FileNotFoundError as e:
+    print(f"❌ Error: {e}")
+    exit()
 
-# ✅ Debug: Check Expected Feature Order
-expected_features = list(scaler.feature_names_in_)
-print(f"✅ Expected Feature Order: {expected_features}")
+# ✅ Test data load karna
+test_data = pd.read_csv("dataset/intrusion_data.csv")
 
-# ✅ Define Test Data (Ensure Same Order)
-X_test_data = [
-    [80, 443, 200, 1.5, 6, 192168001001, 192168001002],
-    [5000, 22, 1500, 5.2, 17, 192168001003, 192168001004],
-    [53, 53, 500, 1.2, 6, 192168001005, 192168001006],
-    [7000, 80, 2500, 7.0, 20, 192168001007, 192168001008],
-    [3000, 443, 1200, 4.5, 15, 192168001011, 192168001012]
-]
+# ✅ Target column identify karna
+target_column = "attack_type"  # Change if different in dataset
 
-# ✅ Convert to DataFrame
-X_test = pd.DataFrame(X_test_data, columns=expected_features)
+# ✅ Features aur labels separate karna
+X_test = test_data.drop(target_column, axis=1)
+y_test = test_data[target_column]
 
-# ✅ Debug: Print Columns
-print(f"🔍 Test Data Columns: {X_test.columns.tolist()}")
+# ✅ Encode target labels (y_test)
+if target_column in encoders:
+    y_test = encoders[target_column].transform(y_test)  # 🛠 FIXED: Encode `y_test`
 
-# ✅ Ensure Feature Order Matches Training Order
-X_test = X_test[expected_features]  # ✅ This Ensures Correct Order
+# ✅ Categorical columns encode karna
+for col in X_test.select_dtypes(include=['object']).columns:
+    if col in encoders:
+        X_test[col] = encoders[col].transform(X_test[col])
 
-# ✅ Scale Test Data
+# ✅ Feature scaling apply karna
 X_test_scaled = scaler.transform(X_test)
-print(f"🔍 Scaled Test Data:\n{X_test_scaled}")  # ✅ Debugging Line
 
-# ✅ Predict
-y_pred_encoded = model.predict(X_test_scaled)
+# ✅ Prediction
+y_pred = model.predict(X_test_scaled)
 
-# ✅ Convert Predictions to Labels
-y_pred = attack_encoder.inverse_transform(y_pred_encoded)
-
-# ✅ Debug: Check Predictions Distribution
-print(f"🔍 Prediction Distribution: {Counter(y_pred_encoded)}")
-
-# ✅ Confusion Matrix
-print("\n🔍 Confusion Matrix:")
-print(confusion_matrix(y_pred_encoded, y_pred_encoded))
-
-# ✅ Fix Classification Report Issue
+# ✅ Classification report print karna
 print("\n📊 Classification Report:")
-print(classification_report(y_pred_encoded, y_pred_encoded, labels=np.unique(y_pred_encoded)))
+print(classification_report(y_test, y_pred))
+
+print("✅ Model Evaluation Completed Successfully!")
+

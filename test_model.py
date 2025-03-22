@@ -1,6 +1,6 @@
 import joblib
 import numpy as np
-import pandas as pd  # ✅ Fix ke liye DataFrame ka use
+import pandas as pd
 
 print("🚀 Model Testing Started...\n")
 
@@ -45,4 +45,3 @@ for case, data in test_cases.items():
         print(f"❌ Error Testing '{case}': {e}")
 
 print("\n✅ Model Testing Completed Successfully! 🚀")
-
