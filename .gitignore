@@ -2,3 +2,4 @@ venv/
 model/
 
 dataset/
+data/raw/*.csv
